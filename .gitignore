@@ -1,15 +1,14 @@
-# Ignora tudo por padrão
+# Ignora tudo
 *
 
-# Re-inclui apenas o que deve ir pro repo
+# Reinclui o que deve ir pro repo
 !.gitignore
 !README.md
 !ghost_of_gov.py
 
-# Permite a pasta dist, mas ignora o conteúdo...
+# Permite a pasta dist…
 !dist/
+# …mas ignora tudo dentro dela…
 dist/**
-
-# ...exceto arquivos .exe (direto em dist ou em subpastas)
-!dist/*.exe
-!dist/**/*.exe
+# …exceto o executável
+!dist/Ghost-of-Gov.exe
