@@ -6,18 +6,16 @@ O `Ghost of Gov` é uma automação desenvolvido em Python para automatizar o pr
 
 Este projeto visa simplificar a obtenção de documentos financeiros para servidores públicos do estado de São Paulo, eliminando a necessidade de downloads manuais repetitivos.
 
-
-
 ## Funcionalidades
 
-- **Automação de Download**: Baixa holerites em PDF de forma automatizada.
+- **Automação de Download**: Baixa holerites em PDF de forma automatizada, com lógica aprimorada para aguardar o carregamento do PDF e acionar o botão de download.
+- **Seleção de Vínculo**: Permite ao usuário escolher entre diferentes vínculos (ex: SPPREV Aposentado, SE Inativo) diretamente pelo terminal.
+- **Seleção Flexível de Anos**: Oferece opções para baixar holerites de todos os anos disponíveis (dentro de um intervalo configurável) ou de um intervalo de anos específico definido pelo usuário.
 - **Navegação Inteligente**: Interage com dropdowns de ano e mês para selecionar os períodos desejados.
 - **Gerenciamento de Sessão**: Utiliza um perfil de navegador persistente (`hybrid_chrome_profile`) para manter o estado de login.
-- **Tratamento de Erros**: Inclui lógica para lidar com meses ou anos não encontrados e botões desabilitados.
+- **Tratamento de Erros Aprimorado**: Inclui lógica para lidar com meses ou anos não encontrados, botões desabilitados e captura de screenshot em caso de falha na execução final para diagnóstico.
 - **Configurável**: Permite ajustar o diretório de download, anos de início e fim, e tempos de espera.
-- **Interface Amigável**: Exibe um banner ASCII (se `pyfiglet` estiver instalado) e instruções claras para o interação manual inicial.
-
-
+- **Interface Amigável**: Exibe um banner ASCII (se `pyfiglet` estiver instalado) e instruções claras para a interação manual inicial.
 
 ## Requisitos
 
@@ -39,8 +37,6 @@ playwright install
 
 **Nota**: O comando `playwright install` é crucial para baixar os drivers do navegador necessários.
 
-
-
 ## Como Usar
 
 1.  **Clone o Repositório (ou baixe o arquivo `ghost_of_gov.py`):**
@@ -53,8 +49,8 @@ playwright install
 2.  **Instale as Dependências:**
 
     ```bash
-    pip install playwright pyfiglet colorama
-    playwright install
+pip install playwright pyfiglet colorama
+playwright install
     ```
 
 3.  **Execute o Script:**
@@ -69,13 +65,15 @@ playwright install
     -   **FAÇA O LOGIN MANUALMENTE** no portal `https://www.sou.sp.gov.br/sou.sp` até a página principal onde os holerites são exibidos.
     -   Após o login, volte para o terminal onde o script está rodando e pressione `ENTER`.
 
-5.  **Automação:**
+5.  **Seleção de Vínculo e Anos:**
 
-    -   O script assumirá o controle do navegador e começará a baixar os holerites para os anos e meses configurados.
+    -   O script perguntará qual vínculo você deseja usar (SPPREV Aposentado ou SE Inativo).
+    -   Em seguida, você poderá escolher entre baixar holerites de todos os anos disponíveis ou especificar um intervalo de anos.
+
+6.  **Automação:**
+
+    -   O script assumirá o controle do navegador e começará a baixar os holerites para os anos e meses selecionados.
     -   Os arquivos PDF serão salvos na pasta `holerites_baixados` dentro do diretório do projeto.
-
-
-
 
 ## Configuração
 
@@ -93,17 +91,16 @@ Você pode ajustar as seguintes variáveis no arquivo `ghost_of_gov.py` para per
 -   `TYPING_DELAY_MS`: Atraso em milissegundos entre cada caractere digitado (simula digitação humana).
 -   `POST_SEARCH_DELAY_MS`: Atraso em milissegundos após uma busca ou interação.
 
-
-
-
 ## Observações Importantes
 
 -   Este script foi desenvolvido para o portal `sou.sp.gov.br`. Alterações na interface do site podem exigir atualizações no código.
 -   O login inicial é manual por questões de segurança e para evitar o armazenamento de credenciais no script.
 -   O script cria um perfil de usuário do Chrome (`hybrid_chrome_profile`) para persistir o estado de login e outras configurações do navegador. Não exclua esta pasta se quiser manter o login e as configurações.
 -   A automação de sites pode ser sensível a mudanças. Se o script parar de funcionar, verifique se houve atualizações no site do SouGov.sp.gov.br.
+-   Em caso de falha na execução, uma screenshot será salva na pasta do projeto para auxiliar no diagnóstico.
 
 ---
 
 © 2025 Paulo Eduardo Moretti. Todos os direitos reservados.
+
 
