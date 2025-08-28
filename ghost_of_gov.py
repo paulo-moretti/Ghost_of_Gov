@@ -3,6 +3,7 @@ from playwright.async_api import async_playwright
 import subprocess
 import sys
 import os
+import re
 
 # BANNER / CORES
 try:
@@ -162,7 +163,6 @@ def ask_years_mode_from_terminal():
                 except Exception:
                     print("Valores inválidos. Tente novamente (somente números AAAA).")
         print("Opção inválida. Tente novamente.")
-# ------------------------------------------------------------------------ #
 
 async def select_year(page):
     """Lógica para selecionar o ano."""
@@ -226,7 +226,152 @@ async def select_months_and_download(page, context, selected_year):
             
         print(f"Aguardando {PDF_LOAD_WAIT_SECONDS} segundos...")
         await page.wait_for_timeout(PDF_LOAD_WAIT_SECONDS * 2000)
-        
+
+        baixou_por_demonstrativo = False
+
+        # 1) Tenta abrir o dropdown "Demonstrativo" (Select2)
+        demonstrativo_opened = False
+        for sel in [
+            '#s2id_sp_formfield_demonstrative a.select2-choice',
+            'xpath=//label[contains(normalize-space(.),"Demonstrativo")]/following::a[contains(@class,"select2-choice")][1]',
+            'xpath=//span[contains(@aria-label,"Demonstrativo")]//a[contains(@class,"select2-choice")]',
+            'xpath=//span[contains(@aria-label,"Demonstrativo")]'
+        ]:
+            try:
+                loc = page.locator(sel)
+                if await loc.count() > 0:
+                    await loc.first.click(timeout=2000)
+                    demonstrativo_opened = True
+                    break
+            except Exception:
+                pass
+
+        if demonstrativo_opened:
+            drop = page.locator('#select2-drop')
+            try:
+                await drop.wait_for(state='visible', timeout=4000)
+            except Exception:
+                pass
+
+            # 2) Coleta as opções válidas
+            labels = []
+            try:
+                items = drop.locator('li.select2-result-selectable')
+                n = await items.count()
+                for i in range(n):
+                    try:
+                        t = (await items.nth(i).inner_text()).strip()
+                        if t and "-- Nenhum --" not in t:
+                            labels.append(t)
+                    except Exception:
+                        pass
+            except Exception:
+                labels = []
+
+            # 3) Se tiver, seleciona e baixa TODAS as opções (normal/suplementar)
+            if labels:
+                for idx, label in enumerate(labels, start=1):
+
+                    # Garante que o dropdown esteja ABERTO: se já estiver visível, não tenta reabrir (evita toggle fechar)
+                    if not await page.locator('#select2-drop').is_visible():
+                        opened = False
+                        for sel in [
+                            '#s2id_sp_formfield_demonstrative a.select2-choice',
+                            'xpath=//label[contains(normalize-space(.),"Demonstrativo")]/following::a[contains(@class,"select2-choice")][1]',
+                            'xpath=//span[contains(@aria-label,"Demonstrativo")]//a[contains(@class,"select2-choice")]',
+                            'xpath=//span[contains(@aria-label,"Demonstrativo")]'
+                        ]:
+                            try:
+                                loc = page.locator(sel)
+                                if await loc.count() > 0:
+                                    await loc.first.click(timeout=2000)
+                                    opened = True
+                                    break
+                            except Exception:
+                                pass
+                        if not opened:
+                            print("AVISO: não consegui abrir o dropdown de Demonstrativo.")
+                            break
+
+                        await page.locator('#select2-drop').wait_for(state='visible', timeout=4000)
+
+                    # Clica na opção pelo texto (usa o label que coletamos)  << CORRIGIDO AQUI
+                    option = page.locator('#select2-drop li.select2-result-selectable').filter(has_text=label).first
+                    try:
+                        await option.scroll_into_view_if_needed()
+                        await option.click(timeout=4000)
+                    except Exception:
+                        print(f"AVISO: não consegui clicar em '{label}'. Pulando.")
+                        continue
+
+                    # Aguarda o botão habilitar após a seleção (algumas telas demoram um pouco)
+                    pdf_button = page.locator('button:has-text("Visualizar PDF")')
+                    for _ in range(16):  # ~8s (16 * 500ms)
+                        try:
+                            if await pdf_button.is_enabled():
+                                break
+                        except Exception:
+                            pass
+                        await page.wait_for_timeout(500)
+
+                    if not await pdf_button.is_enabled():
+                        print(f"AVISO: Botão 'Visualizar PDF' segue desabilitado após '{label}'.")
+                        continue
+
+                    # Nome do arquivo com o rótulo sanitizado
+                    sanitized = re.sub(r'[^A-Za-z0-9_-]+', '_', label).strip('_')
+                    save_path = os.path.join(
+                        DOWNLOAD_DIRECTORY,
+                        f"holerite_{selected_year}_{month_num:02d}_{sanitized}.pdf"
+                    )
+
+                    print(f"Baixando demonstrativo: {label}")
+                    async with context.expect_page() as new_page_info:
+                        await pdf_button.click()
+                    pdf_page = await new_page_info.value
+
+                    try:
+                        await pdf_page.wait_for_load_state('networkidle')
+                        async with pdf_page.expect_download() as download_info:
+                            clicked = False
+                            for sel in (
+                                "css=pdf-viewer >>> #download",
+                                "css=viewer-toolbar >>> #download",
+                                "#download"
+                            ):
+                                try:
+                                    await pdf_page.locator(sel).click(timeout=4000)
+                                    print(f"Botão de download clicado via seletor: {sel}")
+                                    clicked = True
+                                    break
+                                except Exception:
+                                    pass
+                            if not clicked:
+                                raise Exception("Não foi possível acionar o botão de download no visualizador.")
+                        download = await download_info.value
+                        await download.save_as(save_path)
+                        print(f"### SUCESSO: Download concluído. PDF salvo em {save_path} ###")
+                        baixou_por_demonstrativo = True
+                    except Exception as e:
+                        print(f"AVISO: Falha ao baixar demonstrativo '{label}': {e}")
+                    finally:
+                        try:
+                            await pdf_page.close()
+                            print("Aba do PDF (demonstrativo) fechada.")
+                        except Exception:
+                            pass
+
+                # se baixou algum demonstrativo, passa direto ao próximo mês
+                if baixou_por_demonstrativo:
+                    await page.wait_for_timeout(POST_SEARCH_DELAY_MS)
+                    continue
+            else:
+                # não havia opções úteis; fecha dropdown se ficou aberto
+                try:
+                    await page.keyboard.press("Escape")
+                except Exception:
+                    pass
+
         pdf_button = page.locator('button:has-text("Visualizar PDF")')
         try:
             await pdf_button.wait_for(state="visible", timeout=5000)
