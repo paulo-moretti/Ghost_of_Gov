@@ -192,6 +192,32 @@ async def select_months_and_download(page, context, selected_year):
     print(f"\n--- BLOCO 2: SELEÇÃO E DOWNLOAD PARA {selected_year} ---")
     await page.wait_for_timeout(TRANSITION_WAIT_SECONDS * 1000)
 
+    # helper local para fechar qualquer overlay do Select2
+    async def close_select2():
+        for _ in range(30):  # ~3s
+            drop = page.locator('#select2-drop')
+            mask = page.locator('#select2-drop-mask')
+            vis_drop = await drop.is_visible() if await drop.count() else False
+            vis_mask = await mask.is_visible() if await mask.count() else False
+            if not vis_drop and not vis_mask:
+                break
+            try:
+                await page.keyboard.press('Escape')
+            except Exception:
+                pass
+            await page.wait_for_timeout(100)
+        # fallback: clique fora pra garantir
+        try:
+            if await page.locator('#select2-drop-mask').is_visible():
+                await page.locator('#select2-drop-mask').click(timeout=500)
+        except Exception:
+            pass
+        try:
+            # clique no canto superior esquerdo da página (fora dos selects)
+            await page.mouse.click(5, 5)
+        except Exception:
+            pass
+
     month_dropdown_id = "#s2id_sp_formfield_reference_date"
     
     for month_num in range(1, 13):
@@ -226,6 +252,9 @@ async def select_months_and_download(page, context, selected_year):
             
         print(f"Aguardando {PDF_LOAD_WAIT_SECONDS} segundos...")
         await page.wait_for_timeout(PDF_LOAD_WAIT_SECONDS * 2000)
+
+        # FECHA QUALQUER OVERLAY DO SELECT2 ANTES DE SEGUIR
+        await close_select2()
 
         baixou_por_demonstrativo = False
 
@@ -272,7 +301,7 @@ async def select_months_and_download(page, context, selected_year):
             if labels:
                 for idx, label in enumerate(labels, start=1):
 
-                    # Garante que o dropdown esteja ABERTO: se já estiver visível, não tenta reabrir (evita toggle fechar)
+                    # Garante dropdown ABERTO (evita toggle que fecha)
                     if not await page.locator('#select2-drop').is_visible():
                         opened = False
                         for sel in [
@@ -295,7 +324,7 @@ async def select_months_and_download(page, context, selected_year):
 
                         await page.locator('#select2-drop').wait_for(state='visible', timeout=4000)
 
-                    # Clica na opção pelo texto (usa o label que coletamos)  << CORRIGIDO AQUI
+                    # Clica na opção pelo texto (mais robusto no <li>)
                     option = page.locator('#select2-drop li.select2-result-selectable').filter(has_text=label).first
                     try:
                         await option.scroll_into_view_if_needed()
@@ -304,9 +333,9 @@ async def select_months_and_download(page, context, selected_year):
                         print(f"AVISO: não consegui clicar em '{label}'. Pulando.")
                         continue
 
-                    # Aguarda o botão habilitar após a seleção (algumas telas demoram um pouco)
+                    # Aguarda habilitar
                     pdf_button = page.locator('button:has-text("Visualizar PDF")')
-                    for _ in range(16):  # ~8s (16 * 500ms)
+                    for _ in range(16):  # ~8s
                         try:
                             if await pdf_button.is_enabled():
                                 break
@@ -317,6 +346,9 @@ async def select_months_and_download(page, context, selected_year):
                     if not await pdf_button.is_enabled():
                         print(f"AVISO: Botão 'Visualizar PDF' segue desabilitado após '{label}'.")
                         continue
+
+                    # GARANTE QUE NÃO HÁ OVERLAY ANTES DE CLICAR
+                    await close_select2()
 
                     # Nome do arquivo com o rótulo sanitizado
                     sanitized = re.sub(r'[^A-Za-z0-9_-]+', '_', label).strip('_')
@@ -361,12 +393,10 @@ async def select_months_and_download(page, context, selected_year):
                         except Exception:
                             pass
 
-                # se baixou algum demonstrativo, passa direto ao próximo mês
                 if baixou_por_demonstrativo:
                     await page.wait_for_timeout(POST_SEARCH_DELAY_MS)
                     continue
             else:
-                # não havia opções úteis; fecha dropdown se ficou aberto
                 try:
                     await page.keyboard.press("Escape")
                 except Exception:
@@ -381,6 +411,9 @@ async def select_months_and_download(page, context, selected_year):
             continue
 
         if await pdf_button.is_enabled():
+            # GARANTE QUE NÃO HÁ OVERLAY ANTES DE CLICAR
+            await close_select2()
+
             print("Botão 'Visualizar PDF' habilitado. Abrindo nova aba...")
             async with context.expect_page() as new_page_info:
                 await pdf_button.click()
