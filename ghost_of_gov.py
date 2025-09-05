@@ -136,6 +136,8 @@ async def choose_vinculo(page, choice: str):
     await page.locator('div.modal-content button:has-text("Entrar")').click()
     await page.wait_for_selector('h3[title="Contracheque"]', state='visible', timeout=45000)
     await page.locator('h3[title="Contracheque"]').click()
+    page.on("dialog", lambda d: asyncio.create_task(d.dismiss()))
+    await disable_beforeunload(page)
     print("Acesso à área concluído.")
 
 # seleção de anos via terminal #
@@ -168,97 +170,265 @@ async def select_year(page):
     """Lógica para selecionar o ano."""
     print("\n--- BLOCO 1: SELEÇÃO DE ANO ---")
     year_dropdown_id = "#s2id_sp_formfield_reference_year"
+
     await page.locator(f"{year_dropdown_id} a.select2-choice").click()
     search_input = page.locator("#select2-drop input.select2-input")
     await search_input.wait_for(state='visible', timeout=10000)
+
     for year_to_check in range(START_YEAR, END_YEAR + 1):
+        # garante que nenhum modal antigo esteja aberto
+        await close_leave_modal_if_present(page)
+
         year_str = str(year_to_check)
         await search_input.fill("")  # limpa antes
         await search_input.type(year_str, delay=TYPING_DELAY_MS)
         await page.wait_for_timeout(200)
+
         target_option = page.locator(f'div.select2-result-label:has-text("{year_str}")')
         try:
             await target_option.wait_for(state="visible", timeout=1000)
             print(f"Ano '{year_str}' encontrado. Clicando...")
             await target_option.click()
+
+            # desfoca e fecha o modal "Sair da página?" caso apareça
+            await defocus_form(page)
+            await close_leave_modal_if_present(page)
+
             print("--- SUCESSO DO BLOCO 1 ---")
             return year_str
         except Exception:
             pass
+
     raise Exception(f"Nenhum ano entre {START_YEAR}-{END_YEAR} foi encontrado.")
 
-async def select_months_and_download(page, context, selected_year):
-    """Manipula a nova aba e clica no botão de download real."""
-    print(f"\n--- BLOCO 2: SELEÇÃO E DOWNLOAD PARA {selected_year} ---")
-    await page.wait_for_timeout(TRANSITION_WAIT_SECONDS * 1000)
-
-    # helper local para fechar qualquer overlay do Select2
-    async def close_select2():
-        for _ in range(30):  # ~3s
+async def release_focus_to_pdf_button(page):
+    """Fecha Select2/máscara, remove foco de Ano/Mês/Demonstrativo e dá foco no botão Visualizar PDF."""
+    # 1) fecha overlays do Select2 (drop e mask)
+    for _ in range(30):  # ~3s
+        try:
             drop = page.locator('#select2-drop')
             mask = page.locator('#select2-drop-mask')
-            vis_drop = await drop.is_visible() if await drop.count() else False
-            vis_mask = await mask.is_visible() if await mask.count() else False
-            if not vis_drop and not vis_mask:
+            open_drop = (await drop.count()) > 0 and await drop.is_visible()
+            open_mask = (await mask.count()) > 0 and await mask.is_visible()
+            if not open_drop and not open_mask:
                 break
-            try:
-                await page.keyboard.press('Escape')
-            except Exception:
-                pass
-            await page.wait_for_timeout(100)
-        # fallback: clique fora pra garantir
-        try:
-            if await page.locator('#select2-drop-mask').is_visible():
-                await page.locator('#select2-drop-mask').click(timeout=500)
+            await page.keyboard.press('Escape')
         except Exception:
             pass
+        await page.wait_for_timeout(60)
+
+    # 2) remove classes de "ativo" dos containers e blur no activeElement
+    try:
+        await page.evaluate("""
+        () => {
+          const ids = [
+            '#s2id_sp_formfield_reference_year',
+            '#s2id_sp_formfield_reference_date',
+            '#s2id_sp_formfield_demonstrative'
+          ];
+          for (const sel of ids) {
+            const cont = document.querySelector(sel);
+            if (!cont) continue;
+            cont.classList?.remove('select2-container-active','select2-dropdown-open','select2-container-open');
+            const input = cont.querySelector('input.select2-input');
+            if (input && input.blur) input.blur();
+            const choice = cont.querySelector('a.select2-choice');
+            if (choice) {
+              choice.setAttribute('aria-expanded','false');
+              if (choice.blur) choice.blur();
+            }
+          }
+          if (document.activeElement && document.activeElement.blur) {
+            document.activeElement.blur();
+          }
+        }
+        """)
+    except Exception:
+        pass
+
+    # 3) clique neutro pra garantir perda de foco (título/área fora do form)
+    clicked_neutral = False
+    for sel in ['h3[title="Contracheque"]', 'header', 'main', 'div.container', 'body']:
         try:
-            # clique no canto superior esquerdo da página (fora dos selects)
+            loc = page.locator(sel)
+            if await loc.count():
+                await loc.first.click(timeout=300)
+                clicked_neutral = True
+                break
+        except Exception:
+            pass
+    if not clicked_neutral:
+        try:
             await page.mouse.click(5, 5)
         except Exception:
             pass
 
-    month_dropdown_id = "#s2id_sp_formfield_reference_date"
+    # 4) dá foco ao botão (opcional, ajuda o navegador a “entender” o próximo clique)
+    try:
+        btn = page.locator('button:has-text("Visualizar PDF")')
+        if await btn.count():
+            await btn.scroll_into_view_if_needed()
+            await btn.focus()
+    except Exception:
+        pass
+
+    await page.wait_for_timeout(60)
     
+# Fecha o modal "Sair da página?" se aparecer
+async def close_leave_modal_if_present(page):
+    try:
+        title = page.locator('h1#modal-title:has-text("Sair da página?")').first
+        if await title.count() and await title.is_visible():
+            dialog = title.locator('xpath=ancestor::div[contains(@class,"modal-dialog")]').first
+            cancel_btn = dialog.locator('button:has-text("Cancelar")').first
+            if await cancel_btn.count() and await cancel_btn.is_visible():
+                await cancel_btn.click()
+                try:
+                    await dialog.wait_for(state='hidden', timeout=2000)
+                except Exception:
+                    pass
+                return True
+            # fallback: tecla ESC
+            try:
+                await page.keyboard.press("Escape")
+            except Exception:
+                pass
+            return True
+    except Exception:
+        pass
+    return False
+
+# Desfoca sem clicar em links/botões (evita disparar o modal)
+DEFOCUS_SETTLE_MS = 80  # 50–200 ms, ajuste se precisar
+
+async def defocus_form(page):
+    # fecha qualquer Select2/máscara que tenha ficado aberto
+    try:
+        await page.keyboard.press("Escape")
+        await page.keyboard.press("Escape")
+    except Exception:
+        pass
+
+    # tira o foco do elemento ativo
+    try:
+        await page.evaluate("document.activeElement && document.activeElement.blur()")
+    except Exception:
+        pass
+
+    # clique neutro (evita links/botões que disparam modal)
+    clicked = False
+    for sel in [
+        'main', '#sp-main-content', '.portlet .portlet-content',
+        'form', 'div.container', 'div.content', 'body'
+    ]:
+        try:
+            neutral = page.locator(f'{sel} >> :not(a,button,input,select,textarea,label)')
+            if await neutral.count():
+                await neutral.first.click(position={"x": 5, "y": 5}, timeout=300)
+                clicked = True
+                break
+        except Exception:
+            pass
+    if not clicked:
+        try:
+            vp = await page.evaluate('() => ({w: innerWidth, h: innerHeight})')
+            await page.mouse.click(max(1, vp["w"] - 5), max(1, vp["h"] - 5))
+        except Exception:
+            pass
+
+    await page.wait_for_timeout(DEFOCUS_SETTLE_MS)
+    
+async def disable_beforeunload(page):
+    try:
+        await page.add_init_script("""
+            (function() {
+              window.onbeforeunload = null;
+              const _addEventListener = window.addEventListener;
+              window.addEventListener = function(type, listener, options) {
+                if (type === 'beforeunload') return; // bloqueia novos
+                return _addEventListener.call(this, type, listener, options);
+              };
+            })();
+        """)
+        await page.evaluate("""
+            window.onbeforeunload = null;
+            window.addEventListener = (function(orig){
+              return function(type, listener, options){
+                if(type === 'beforeunload') return;
+                return orig.call(this, type, listener, options);
+              };
+            })(window.addEventListener);
+        """)
+    except Exception:
+        pass    
+
+async def select_months_and_download(page, context, selected_year):
+    """Seleciona mês a mês e baixa os PDFs (normal e suplementar quando existir)."""
+    print(f"\n--- BLOCO 2: SELEÇÃO E DOWNLOAD PARA {selected_year} ---")
+    await page.wait_for_timeout(TRANSITION_WAIT_SECONDS * 1000)
+
+    month_dropdown_id = "#s2id_sp_formfield_reference_date"
+
     for month_num in range(1, 13):
         print("-" * 20)
+
+        # Antes de abrir o Select2 do mês, garanta que não há modal aberto
+        await close_leave_modal_if_present(page)
+
         await page.locator(month_dropdown_id).click()
-        
+        await close_leave_modal_if_present(page)  # se o clique disparar o modal, fecha
+
         month_search_input = page.locator("#select2-drop input.select2-input")
         try:
             await month_search_input.wait_for(state='visible', timeout=5000)
         except Exception:
             print(f"ERRO: Caixa de busca de mês não apareceu para {month_num:02d}/{selected_year}. Pulando.")
-            await page.locator("body").press("Escape")
+            try:
+                await page.locator("body").press("Escape")
+            except Exception:
+                pass
             await page.wait_for_timeout(POST_SEARCH_DELAY_MS)
             continue
 
         month_str = f"{month_num:02d}/{selected_year}"
         print(f"Buscando pelo mês '{month_str}'...")
-        await month_search_input.fill("")  # limpa antes
+        await month_search_input.fill("")
         await month_search_input.type(month_str, delay=TYPING_DELAY_MS)
-        
+
         month_option = page.locator(f'div.select2-result-label:has-text("{month_str}")')
         try:
             await month_option.wait_for(state="visible", timeout=1500)
             print(f"Mês '{month_str}' encontrado. Selecionando...")
             await month_option.click()
+            await close_leave_modal_if_present(page)  # se aparecer ao selecionar, fecha
         except Exception:
             print(f"Mês '{month_str}' não encontrado. Pulando.")
             if await page.locator("#select2-drop").is_visible():
-                await page.locator("body").press("Escape")
+                try:
+                    await page.locator("body").press("Escape")
+                except Exception:
+                    pass
             await page.wait_for_timeout(POST_SEARCH_DELAY_MS)
             continue
-            
+
+        # Desfoca imediatamente o Select2 (evita borda azul/scroll)
+        try:
+            await defocus_form(page)
+            await page.locator('#select2-drop').wait_for(state='hidden', timeout=2000)
+        except Exception:
+            pass
+        await close_leave_modal_if_present(page)
+
         print(f"Aguardando {PDF_LOAD_WAIT_SECONDS} segundos...")
         await page.wait_for_timeout(PDF_LOAD_WAIT_SECONDS * 2000)
 
-        # FECHA QUALQUER OVERLAY DO SELECT2 ANTES DE SEGUIR
-        await close_select2()
+        # Garante foco longe dos selects e modal fechado
+        await release_focus_to_pdf_button(page)
+        await close_leave_modal_if_present(page)
 
         baixou_por_demonstrativo = False
 
-        # 1) Tenta abrir o dropdown "Demonstrativo" (Select2)
+        # 1) Abrir "Demonstrativo" (se houver) e baixar todas as opções
         demonstrativo_opened = False
         for sel in [
             '#s2id_sp_formfield_demonstrative a.select2-choice',
@@ -270,6 +440,7 @@ async def select_months_and_download(page, context, selected_year):
                 loc = page.locator(sel)
                 if await loc.count() > 0:
                     await loc.first.click(timeout=2000)
+                    await close_leave_modal_if_present(page)
                     demonstrativo_opened = True
                     break
             except Exception:
@@ -282,7 +453,6 @@ async def select_months_and_download(page, context, selected_year):
             except Exception:
                 pass
 
-            # 2) Coleta as opções válidas
             labels = []
             try:
                 items = drop.locator('li.select2-result-selectable')
@@ -297,13 +467,11 @@ async def select_months_and_download(page, context, selected_year):
             except Exception:
                 labels = []
 
-            # 3) Se tiver, seleciona e baixa TODAS as opções (normal/suplementar)
             if labels:
-                for idx, label in enumerate(labels, start=1):
-
-                    # Garante dropdown ABERTO (evita toggle que fecha)
+                for label in labels:
+                    # reabre se necessário
                     if not await page.locator('#select2-drop').is_visible():
-                        opened = False
+                        reopened = False
                         for sel in [
                             '#s2id_sp_formfield_demonstrative a.select2-choice',
                             'xpath=//label[contains(normalize-space(.),"Demonstrativo")]/following::a[contains(@class,"select2-choice")][1]',
@@ -312,65 +480,65 @@ async def select_months_and_download(page, context, selected_year):
                         ]:
                             try:
                                 loc = page.locator(sel)
-                                if await loc.count() > 0:
+                                if await loc.count():
                                     await loc.first.click(timeout=2000)
-                                    opened = True
+                                    await close_leave_modal_if_present(page)
+                                    reopened = True
                                     break
                             except Exception:
                                 pass
-                        if not opened:
-                            print("AVISO: não consegui abrir o dropdown de Demonstrativo.")
+                        if not reopened:
+                            print("AVISO: não consegui reabrir o dropdown de Demonstrativo.")
                             break
-
                         await page.locator('#select2-drop').wait_for(state='visible', timeout=4000)
 
-                    # Clica na opção pelo texto (mais robusto no <li>)
                     option = page.locator('#select2-drop li.select2-result-selectable').filter(has_text=label).first
                     try:
                         await option.scroll_into_view_if_needed()
                         await option.click(timeout=4000)
+                        await close_leave_modal_if_present(page)
                     except Exception:
                         print(f"AVISO: não consegui clicar em '{label}'. Pulando.")
                         continue
 
-                    # Aguarda habilitar
+                    # Desfoca o demonstrativo e prepara o botão
+                    try:
+                        await defocus_form(page)
+                        await page.locator('#select2-drop').wait_for(state='hidden', timeout=2000)
+                    except Exception:
+                        pass
+                    await release_focus_to_pdf_button(page)
+                    await close_leave_modal_if_present(page)
+
+                    # aguarda habilitar
                     pdf_button = page.locator('button:has-text("Visualizar PDF")')
-                    for _ in range(16):  # ~8s
+                    for _ in range(16):
                         try:
                             if await pdf_button.is_enabled():
                                 break
                         except Exception:
                             pass
                         await page.wait_for_timeout(500)
-
                     if not await pdf_button.is_enabled():
                         print(f"AVISO: Botão 'Visualizar PDF' segue desabilitado após '{label}'.")
                         continue
 
-                    # GARANTE QUE NÃO HÁ OVERLAY ANTES DE CLICAR
-                    await close_select2()
-
-                    # Nome do arquivo com o rótulo sanitizado
-                    sanitized = re.sub(r'[^A-Za-z0-9_-]+', '_', label).strip('_')
-                    save_path = os.path.join(
-                        DOWNLOAD_DIRECTORY,
-                        f"holerite_{selected_year}_{month_num:02d}_{sanitized}.pdf"
-                    )
+                    await pdf_button.scroll_into_view_if_needed()
+                    await page.wait_for_timeout(50)
 
                     print(f"Baixando demonstrativo: {label}")
                     async with context.expect_page() as new_page_info:
-                        await pdf_button.click()
+                        try:
+                            await pdf_button.click()
+                        except Exception:
+                            await pdf_button.click(force=True)
                     pdf_page = await new_page_info.value
 
                     try:
                         await pdf_page.wait_for_load_state('networkidle')
                         async with pdf_page.expect_download() as download_info:
                             clicked = False
-                            for sel in (
-                                "css=pdf-viewer >>> #download",
-                                "css=viewer-toolbar >>> #download",
-                                "#download"
-                            ):
+                            for sel in ("css=pdf-viewer >>> #download", "css=viewer-toolbar >>> #download", "#download"):
                                 try:
                                     await pdf_page.locator(sel).click(timeout=4000)
                                     print(f"Botão de download clicado via seletor: {sel}")
@@ -381,6 +549,9 @@ async def select_months_and_download(page, context, selected_year):
                             if not clicked:
                                 raise Exception("Não foi possível acionar o botão de download no visualizador.")
                         download = await download_info.value
+
+                        sanitized = re.sub(r'[^A-Za-z0-9_-]+', '_', label).strip('_')
+                        save_path = os.path.join(DOWNLOAD_DIRECTORY, f"holerite_{selected_year}_{month_num:02d}_{sanitized}.pdf")
                         await download.save_as(save_path)
                         print(f"### SUCESSO: Download concluído. PDF salvo em {save_path} ###")
                         baixou_por_demonstrativo = True
@@ -389,6 +560,7 @@ async def select_months_and_download(page, context, selected_year):
                     finally:
                         try:
                             await pdf_page.close()
+                            await page.bring_to_front()
                             print("Aba do PDF (demonstrativo) fechada.")
                         except Exception:
                             pass
@@ -402,6 +574,7 @@ async def select_months_and_download(page, context, selected_year):
                 except Exception:
                     pass
 
+        # 2) Fluxo sem demonstrativo
         pdf_button = page.locator('button:has-text("Visualizar PDF")')
         try:
             await pdf_button.wait_for(state="visible", timeout=5000)
@@ -411,17 +584,29 @@ async def select_months_and_download(page, context, selected_year):
             continue
 
         if await pdf_button.is_enabled():
-            # GARANTE QUE NÃO HÁ OVERLAY ANTES DE CLICAR
-            await close_select2()
+            # reforços contra modal + foco
+            try:
+                await defocus_form(page)
+                await page.locator('#select2-drop').wait_for(state='hidden', timeout=2000)
+            except Exception:
+                pass
+            await release_focus_to_pdf_button(page)
+            await close_leave_modal_if_present(page)
+
+            await pdf_button.scroll_into_view_if_needed()
+            await page.wait_for_timeout(50)
 
             print("Botão 'Visualizar PDF' habilitado. Abrindo nova aba...")
             async with context.expect_page() as new_page_info:
-                await pdf_button.click()
-            
+                try:
+                    await pdf_button.click()
+                except Exception:
+                    await pdf_button.click(force=True)
             pdf_page = await new_page_info.value
-            print(f"Nova aba aberta. Aguardando carregamento...")
+
+            print("Nova aba aberta. Aguardando carregamento...")
             await pdf_page.wait_for_load_state('networkidle')
-            
+
             async with pdf_page.expect_download() as download_info:
                 clicked = False
                 for sel in ("css=pdf-viewer >>> #download", "css=viewer-toolbar >>> #download", "#download"):
@@ -434,17 +619,18 @@ async def select_months_and_download(page, context, selected_year):
                         pass
                 if not clicked:
                     raise Exception("Não foi possível acionar o botão de download no visualizador.")
-            
+
             download = await download_info.value
             save_path = os.path.join(DOWNLOAD_DIRECTORY, f"holerite_{selected_year}_{month_num:02d}.pdf")
             await download.save_as(save_path)
             print(f"### SUCESSO: Download concluído. PDF salvo em {save_path} ###")
-            
+
             await pdf_page.close()
+            await page.bring_to_front()
             print("Aba do PDF fechada.")
         else:
             print(f"AVISO: Botão 'Visualizar PDF' para o mês {month_str} está desabilitado.")
-        
+
         await page.wait_for_timeout(POST_SEARCH_DELAY_MS)
 
     print("--- SUCESSO DO BLOCO 2 ---")
@@ -455,12 +641,16 @@ async def select_specific_year(page, year_str: str) -> bool:
     year_dropdown_id = "#s2id_sp_formfield_reference_year"
     dropdown = page.locator(f"{year_dropdown_id} a.select2-choice")
     await dropdown.click()
+
     drop = page.locator("#select2-drop")
     try:
         await drop.wait_for(state='visible', timeout=10000)
     except Exception:
         await dropdown.click()
         await drop.wait_for(state='visible', timeout=10000)
+
+    # garante que não há modal aberto antes de interagir
+    await close_leave_modal_if_present(page)
 
     search_input = drop.locator("input.select2-input")
     await search_input.wait_for(state='visible', timeout=10000)
@@ -473,6 +663,11 @@ async def select_specific_year(page, year_str: str) -> bool:
         await option.wait_for(state="visible", timeout=1200)
         print(f"Ano '{year_str}' encontrado. Clicando...")
         await option.click()
+
+        # desfoca e fecha o modal "Sair da página?" caso tenha surgido
+        await defocus_form(page)
+        await close_leave_modal_if_present(page)
+
         return True
     except Exception:
         print(f"Ano '{year_str}' não encontrado. Pulando.")
@@ -493,9 +688,14 @@ async def run_final_execution_flow(page, context, vinculo_choice: str, years_mod
     # --- ESPERAS ---
     print(f"Esperando {INITIAL_WAIT_SECONDS}s...")
     await page.wait_for_timeout(INITIAL_WAIT_SECONDS * 1000)
+
+    # Seleciona "Anteriores" e já trata o modal "Sair da página?"
     await page.locator('#s2id_sp_formfield_type_of_request a.select2-choice').click()
     await page.locator('div.select2-result-label:has-text("Anteriores")').click()
+    await page.wait_for_timeout(50)  # respiro pro Select2 fechar
+    await close_leave_modal_if_present(page)
     print("Tipo de solicitação alterado.")
+
     print(f"Esperando {SECONDARY_WAIT_SECONDS}s...")
     await page.wait_for_timeout(SECONDARY_WAIT_SECONDS * 1000)
     print("Página pronta.")
@@ -550,21 +750,47 @@ async def main():
             browser = await p.chromium.connect_over_cdp(f"http://localhost:{REMOTE_DEBUGGING_PORT}")
             context = browser.contexts[0]
             page = context.pages[0]
+
+            # --- timeouts padrão (recomendado) ---
+            context.set_default_timeout(45000)
+            page.set_default_timeout(45000)
+
+            # --- limpeza preventiva de qualquer modal pendente ---
+            await close_leave_modal_if_present(page)
+
+            # --- Handler global para qualquer dialog (alert/confirm/prompt/beforeunload) ---
+            async def _dismiss_dialog(dlg):
+                try:
+                    await dlg.dismiss()
+                except Exception:
+                    pass
+
+            page.on("dialog", _dismiss_dialog)
+
+            # --- Qualquer nova aba/página (ex.: visualizador de PDF) também herda o handler ---
+            def _wire_new_page(pg):
+                pg.on("dialog", lambda d: asyncio.create_task(_dismiss_dialog(d)))
+            context.on("page", _wire_new_page)
+
             print("Conexão estabelecida!")
             await run_final_execution_flow(page, context, vinculo_choice, years_mode)
+
         except Exception as e:
             print(f"\n--- FALHA NA EXECUÇÃO FINAL ---")
             print(f"ERRO: {e}")
             if page:
-                screenshot_path = f"falha_execucao_final.png"
-                await page.screenshot(path=screenshot_path)
-                print(f"Diagnóstico salvo em: {screenshot_path}")
+                screenshot_path = "falha_execucao_final.png"
+                try:
+                    await page.screenshot(path=screenshot_path)
+                    print(f"Diagnóstico salvo em: {screenshot_path}")
+                except Exception:
+                    pass
 
 if __name__ == "__main__":
     if not os.path.exists(CHROME_PATH_WINDOWS):
         print(f"ERRO: Caminho do Chrome não encontrado em '{CHROME_PATH_WINDOWS}'.")
         sys.exit(1)
-        
+
     asyncio.run(main())
     print("\nScript finalizado. Pressione ENTER para sair.")
     input()
