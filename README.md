@@ -85,52 +85,61 @@ ghost_of_gov/
 ├── holerites_baixados/
 ├── requirements.txt
 └── README.md
-Execução local
-pip install playwright pyfiglet colorama
-playwright install
-python ghost_of_gov.py
-Durante a execução:
+```
 
-O login é realizado manualmente
+---
 
-O controle retorna automaticamente ao script
+## Execução local
 
-Os arquivos são salvos localmente
+-pip install playwright pyfiglet colorama
+-playwright install
+-python ghost_of_gov.py
 
-Considerações de segurança
-Credenciais não são armazenadas em código
+---
 
-Login manual por decisão de segurança
+## Durante a execução:
 
-Sessões persistem apenas localmente
+-O login é realizado manualmente
+-O controle retorna automaticamente ao script
+-Os arquivos são salvos localmente
 
-O projeto respeita os limites e comportamento da plataforma automatizada
+---
 
-Evolução planejada (roadmap)
+## Considerações de segurança:
+
+-Credenciais não são armazenadas em código
+-Login manual por decisão de segurança
+-Sessões persistem apenas localmente
+-O projeto respeita os limites e comportamento da plataforma automatizada
+
+---
+
+## Evolução planejada (roadmap):
+
 O projeto está sendo evoluído para deixar de ser uma automação local e se tornar
 um sistema de automação centralizado, com foco em operações e escalabilidade.
 
-Próximas etapas planejadas:
+---
 
-Interface web para gerenciamento de execuções
+## Próximas etapas planejadas:
 
-Suporte a múltiplos usuários
+-Interface web para gerenciamento de execuções
+-Suporte a múltiplos usuários
+-Sistema de filas para downloads
+-Execução em background
+-Padronização de logs
+-Métricas de execução
+-Containerização do serviço
+-Integração com CI/CD
 
-Sistema de filas para downloads
+---
 
-Execução em background
+## Contexto
 
-Padronização de logs
-
-Métricas de execução
-
-Containerização do serviço
-
-Integração com CI/CD
-
-Contexto
 Projeto pessoal desenvolvido como parte da minha transição para a área de
 DevOps / SRE, com foco em automação de processos, confiabilidade e operação
 de sistemas.
+
+---
 
 © 2025 Paulo Eduardo Moretti. Todos os direitos reservados.
