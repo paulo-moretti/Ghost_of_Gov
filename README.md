@@ -6,8 +6,6 @@ com foco em **execução confiável, padronização operacional e redução de t
 O projeto está em evolução para um **sistema web multiusuário**, com **filas de execução**
 e suporte a **múltiplos logins**, deixando de ser uma automação local.
 
----
-
 ## Visão geral
 
 O Ghost of Gov automatiza o fluxo de acesso, navegação e download de holerites
@@ -19,8 +17,6 @@ sem armazenar credenciais sensíveis.
 
 Inicialmente desenvolvido como automação local, o projeto está sendo evoluído
 para um **serviço centralizado**, com foco em escalabilidade e operação contínua.
-
----
 
 ## Problema resolvido
 
@@ -38,8 +34,6 @@ Com a automação:
 - Ganho de eficiência operacional
 - Base preparada para execução em larga escala
 
----
-
 ## Como funciona atualmente
 
 1. Inicializa um navegador controlado via Playwright  
@@ -52,8 +46,6 @@ Com a automação:
 
 A execução ocorre via terminal, com instruções claras para o operador.
 
----
-
 ## Funcionalidades atuais
 
 - Automação completa de download de holerites em PDF  
@@ -65,16 +57,12 @@ A execução ocorre via terminal, com instruções claras para o operador.
 - Captura automática de screenshots em falhas  
 - Configuração flexível de diretórios e tempos de espera  
 
----
-
 ## Stack utilizada
 
 - Python  
 - Playwright  
 - Chrome DevTools Protocol  
 - PyFiglet  
-
----
 
 ## Estrutura do projeto (atual)
 
@@ -87,23 +75,17 @@ ghost_of_gov/
 └── README.md
 ```
 
----
-
 ## Execução local
 
 - pip install playwright pyfiglet colorama
 - playwright install
 - python ghost_of_gov.py
 
----
-
 ## Durante a execução:
 
 - O login é realizado manualmente
 - O controle retorna automaticamente ao script
 - Os arquivos são salvos localmente
-
----
 
 ## Considerações de segurança:
 
@@ -112,14 +94,10 @@ ghost_of_gov/
 - Sessões persistem apenas localmente
 - O projeto respeita os limites e comportamento da plataforma automatizada
 
----
-
 ## Evolução planejada (roadmap):
 
 O projeto está sendo evoluído para deixar de ser uma automação local e se tornar
 um sistema de automação centralizado, com foco em operações e escalabilidade.
-
----
 
 ## Próximas etapas planejadas:
 
@@ -131,8 +109,6 @@ um sistema de automação centralizado, com foco em operações e escalabilidade
 - Métricas de execução
 - Containerização do serviço
 - Integração com CI/CD
-
----
 
 ## Contexto
 
