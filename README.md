@@ -91,26 +91,26 @@ ghost_of_gov/
 
 ## Execução local
 
--pip install playwright pyfiglet colorama
--playwright install
--python ghost_of_gov.py
+- pip install playwright pyfiglet colorama
+- playwright install
+- python ghost_of_gov.py
 
 ---
 
 ## Durante a execução:
 
--O login é realizado manualmente
--O controle retorna automaticamente ao script
--Os arquivos são salvos localmente
+- O login é realizado manualmente
+- O controle retorna automaticamente ao script
+- Os arquivos são salvos localmente
 
 ---
 
 ## Considerações de segurança:
 
--Credenciais não são armazenadas em código
--Login manual por decisão de segurança
--Sessões persistem apenas localmente
--O projeto respeita os limites e comportamento da plataforma automatizada
+- Credenciais não são armazenadas em código
+- Login manual por decisão de segurança
+- Sessões persistem apenas localmente
+- O projeto respeita os limites e comportamento da plataforma automatizada
 
 ---
 
@@ -123,14 +123,14 @@ um sistema de automação centralizado, com foco em operações e escalabilidade
 
 ## Próximas etapas planejadas:
 
--Interface web para gerenciamento de execuções
--Suporte a múltiplos usuários
--Sistema de filas para downloads
--Execução em background
--Padronização de logs
--Métricas de execução
--Containerização do serviço
--Integração com CI/CD
+- Interface web para gerenciamento de execuções
+- Suporte a múltiplos usuários
+- Sistema de filas para downloads
+- Execução em background
+- Padronização de logs
+- Métricas de execução
+- Containerização do serviço
+- Integração com CI/CD
 
 ---
 
